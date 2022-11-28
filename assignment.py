@@ -112,8 +112,8 @@ class FrozenLake(Environment):
         return state, reward, done
         
     def isAbsorbingState(self, state): return state == self.size
-    def isStartState(self, state): return state == np.where(self.lake_flat == '$')
-    def isGoalState(self, state): return state == np.where(self.lake_flat == '&')
+    def isStartState(self, state): return state == np.where(self.lake_flat == '&')[0][0]
+    def isGoalState(self, state): return state == np.where(self.lake_flat == '$')[0][0]
     def isHoleState(self, state): return state in self.holeStates
     
     def p(self, next_state, state, action):
@@ -131,9 +131,8 @@ class FrozenLake(Environment):
         for _a in actions: ps[getCoords(_a)[0], getCoords(_a)[1]] += self.slip / 4
         return ps.flatten()[next_state]
     
-    def r(self, next_state, state, action):
-        # TODO:
-        return
+    def r(self, _, state, __):
+        return 1 if self.isGoalState(state) else 0
     
     def render(self, policy=None, value=None):
         if policy is None:
@@ -177,26 +176,32 @@ def play(env):
         print('Reward: {0}.'.format(r))
         
 def policy_evaluation(env, policy, gamma, theta, max_iterations):
-    value = np.zeros(env.n_states, dtype=np.float)
-
-    # TODO:
-
+    value = np.zeros(env.n_states, dtype=float)
+    inner = lambda s, a: sum([env.p(s_, s, a) * (env.r(s_, s, a) + gamma * value[s_]) for s_ in range(env.n_states)])
+    outer = lambda s: inner(s, policy[s])
+    for _ in range(max_iterations):
+        v = value.copy();
+        value = [outer(s) for s in range(env.n_states)]
+        if max([abs(v[i] - value[i]) for i in range(len(value))]) < theta: break
     return value
     
 def policy_improvement(env, value, gamma):
-    policy = np.zeros(env.n_states, dtype=int)
-    
-    # TODO:
-
-    return policy
+    inner = lambda s, a: sum([env.p(s_, s, a) * (env.r(s_, s, a) + gamma * value[s_]) for s_ in range(env.n_states)])
+    outer = lambda s: np.argmax([inner(s, a) for a in range(env.n_actions)])
+    return np.array([outer(s) for s in range(env.n_states)])
     
 def policy_iteration(env, gamma, theta, max_iterations, policy=None):
     if policy is None:
         policy = np.zeros(env.n_states, dtype=int)
     else:
         policy = np.array(policy, dtype=int)
+    value = policy_evaluation(env, policy, gamma, theta, max_iterations)
     
-    # TODO:
+    old_policy = None
+    while not np.array_equal(policy, old_policy):
+        old_policy = policy.copy()
+        policy = policy_improvement(env, value, gamma)
+        value = policy_evaluation(env, policy, gamma, theta, max_iterations)
         
     return policy, value
     
@@ -486,12 +491,23 @@ def main():
             ['.', '.', '.', '#'],
             ['#', '.', '.', '$']]
     
-    max_steps = len([cell for row in lake for cell in row])\
-
+    
+    
+    max_steps = len([cell for row in lake for cell in row])
+        
     env = FrozenLake(lake, slip=0.1, max_steps=max_steps, seed=seed)
     gamma = 0.9
     
-    play(env)
+    good_policy = np.zeros(env.n_states, dtype=int)
+    good_policy.fill(3)
+    for s in [2, 6, 10]: good_policy[s] = 2
+    
+    bad_policy = np.zeros(env.n_states, dtype=int)
+    
+    policy, value = policy_iteration(env, gamma, 0.0001, 100, bad_policy)
+    print(policy)
+
+    # play(env)
     return
     
     print('# Model-based algorithms')
