@@ -181,7 +181,7 @@ def policy_evaluation(env, policy, gamma, theta, max_iterations):
     outer = lambda s: inner(s, policy[s])
     for _ in range(max_iterations):
         v = value.copy();
-        value = [outer(s) for s in range(env.n_states)]
+        value = np.array([outer(s) for s in range(env.n_states)])
         if max([abs(v[i] - value[i]) for i in range(len(value))]) < theta: break
     return value
     
@@ -206,13 +206,19 @@ def policy_iteration(env, gamma, theta, max_iterations, policy=None):
     return policy, value
     
 def value_iteration(env, gamma, theta, max_iterations, value=None):
-    if value is None:
-        value = np.zeros(env.n_states)
-    else:
-        value = np.array(value, dtype=np.float)
-    
-    # TODO:
-
+    value = np.zeros(env.n_states) if value is None else np.array(value, dtype=np.float)
+    # Define math function as outer
+    inner = lambda s, a: sum([env.p(s_, s, a) * (env.r(s_, s, a) + gamma * value[s_]) for s_ in range(env.n_states)])
+    outer = lambda s: np.max([inner(s, a) for a in range(env.n_actions)])
+    # Iterate
+    for _ in range(max_iterations):
+        _value = value.copy()
+        value = np.array([outer(s) for s in range(env.n_states)])
+        if max([abs(_value[i] - value[i]) for i in range(len(value))]) < theta: break
+    # TODO: Ask about theta and max_iterations implementaiton
+    inner = lambda s, a: sum([env.p(s_, s, a) * value[s_] for s_ in range(env.n_states)])
+    outer = lambda s: np.argmax([inner(s, a) for a in range(env.n_actions)])
+    policy = np.array([outer(s) for s in range(env.n_states)])
     return policy, value
 
 #region Later
@@ -504,8 +510,13 @@ def main():
     
     bad_policy = np.zeros(env.n_states, dtype=int)
     
+    policy, value = value_iteration(env, gamma, 0.0001, 100)
+    print(policy[:-1].reshape(4, 4))
+    print(value[:-1].reshape(4, 4))
+    
     policy, value = policy_iteration(env, gamma, 0.0001, 100, bad_policy)
-    print(policy)
+    print(policy[:-1].reshape(4, 4))
+    print(value[:-1].reshape(4, 4))
 
     # play(env)
     return
