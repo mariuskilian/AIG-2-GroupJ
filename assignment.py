@@ -98,8 +98,6 @@ class FrozenLake(Environment):
         
         self.absorbing_state = n_states - 1
         
-        # TODO:
-        
         Environment.__init__(self, n_states, n_actions, max_steps, pi, seed=seed)
         
     actions = {'w':0, 'a':1, 's':2, 'd':3}
@@ -124,11 +122,12 @@ class FrozenLake(Environment):
         # Describes [y, x] movement of the action
         actions = [[-1, 0], [0, -1], [1, 0], [0, 1]]
         a = actions[action]
-        ps = np.ndarray((self.width, self.width))
+        w = self.width
+        ps = np.ndarray((w, w))
         ps.fill(0)
-        getCoords = lambda a: (np.array([state//4, state%4]) + np.array(a)).clip(0, self.width - 1)
+        getCoords = lambda a: (np.array([state//w, state%w]) + np.array(a)).clip(0, self.width - 1)
         ps[getCoords(a)[0], getCoords(a)[1]] = 1 - self.slip
-        for _a in actions: ps[getCoords(_a)[0], getCoords(_a)[1]] += self.slip / 4
+        for _a in actions: ps[getCoords(_a)[0], getCoords(_a)[1]] += self.slip / self.n_actions
         return ps.flatten()[next_state]
     
     def r(self, _, state, __):
@@ -215,7 +214,6 @@ def value_iteration(env, gamma, theta, max_iterations, value=None):
         _value = value.copy()
         value = np.array([outer(s) for s in range(env.n_states)])
         if max([abs(_value[i] - value[i]) for i in range(len(value))]) < theta: break
-    # TODO: Ask about theta and max_iterations implementaiton
     inner = lambda s, a: sum([env.p(s_, s, a) * value[s_] for s_ in range(env.n_states)])
     outer = lambda s: np.argmax([inner(s, a) for a in range(env.n_actions)])
     policy = np.array([outer(s) for s in range(env.n_states)])
@@ -232,7 +230,17 @@ def sarsa(env, max_episodes, eta, gamma, epsilon, seed=None):
     
     for i in range(max_episodes):
         s = env.reset()
-        # TODO:
+        # Select action a for state s according to an ε-greedy policy based on Q
+        qs = lambda s: {a : q[s, a] for a in range(env.n_actions)}
+        random_max = lambda s:  (a_maxs := [a for a, q in qs(s).items() if q == max(qs(s).values())])[random_state.randint(0, len(a_maxs))]
+        select_a = lambda s: random_max(s) if random_state.rand() > epsilon[i] else random_state.randint(0, env.n_actions)
+        a = select_a(s)
+        
+        while (not env.isAbsorbingState(s)):
+            s_, r = env.draw(s, a)
+            a_ = select_a(s_)
+            q[s, a] += eta[i] * (r + gamma*q[s_, a_] - q[s,a])
+            s, a = s_, a_
     
     policy = q.argmax(axis=1)
     value = q.max(axis=1)
@@ -249,8 +257,17 @@ def q_learning(env, max_episodes, eta, gamma, epsilon, seed=None):
     
     for i in range(max_episodes):
         s = env.reset()
-        # TODO:
+        # Select action a for state s according to an ε-greedy policy based on Q
+        qs = lambda s: {a : q[s, a] for a in range(env.n_actions)}
+        random_max = lambda s:  (a_maxs := [a for a, q in qs(s).items() if q == max(qs(s).values())])[random_state.randint(0, len(a_maxs))]
+        select_a = lambda s: random_max(s) if random_state.rand() > epsilon[i] else random_state.randint(0, env.n_actions)
         
+        while (not env.isAbsorbingState(s)):
+            a = select_a(s)
+            s_, r = env.draw(s, a)
+            q[s, a] += eta[i] * (r + gamma*max(qs(s).values()) - q[s,a])
+            s = s_
+              
     policy = q.argmax(axis=1)
     value = q.max(axis=1)
         
@@ -504,22 +521,19 @@ def main():
     env = FrozenLake(lake, slip=0.1, max_steps=max_steps, seed=seed)
     gamma = 0.9
     
-    good_policy = np.zeros(env.n_states, dtype=int)
-    good_policy.fill(3)
-    for s in [2, 6, 10]: good_policy[s] = 2
+    # good_policy = np.zeros(env.n_states, dtype=int)
+    # good_policy.fill(3)
+    # for s in [2, 6, 10]: good_policy[s] = 2
     
-    bad_policy = np.zeros(env.n_states, dtype=int)
+    # bad_policy = np.zeros(env.n_states, dtype=int)
     
-    policy, value = value_iteration(env, gamma, 0.0001, 100)
-    print(policy[:-1].reshape(4, 4))
-    print(value[:-1].reshape(4, 4))
+    # policy, value = value_iteration(env, gamma, 0.0001, 100)
+    # print(policy[:-1].reshape(4, 4))
+    # print(value[:-1].reshape(4, 4))
     
-    policy, value = policy_iteration(env, gamma, 0.0001, 100, bad_policy)
-    print(policy[:-1].reshape(4, 4))
-    print(value[:-1].reshape(4, 4))
-
-    # play(env)
-    return
+    # policy, value = policy_iteration(env, gamma, 0.0001, 100, bad_policy)
+    # print(policy[:-1].reshape(4, 4))
+    # print(value[:-1].reshape(4, 4))
     
     print('# Model-based algorithms')
 
@@ -542,10 +556,10 @@ def main():
 
     print('')
 
-    print('## Sarsa')
-    policy, value = sarsa(env, max_episodes, eta=0.5, gamma=gamma,
-                          epsilon=0.5, seed=seed)
-    env.render(policy, value)
+    # print('## Sarsa')
+    # policy, value = sarsa(env, max_episodes, eta=0.5, gamma=gamma,
+    #                       epsilon=0.5, seed=seed)
+    # env.render(policy, value)
 
     print('')
 
