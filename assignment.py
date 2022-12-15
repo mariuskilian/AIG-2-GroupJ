@@ -1,6 +1,7 @@
 import numpy as np
 import contextlib
 import torch
+from collections import deque
 
 # Configures numpy print options
 @contextlib.contextmanager
@@ -243,13 +244,11 @@ def sarsa(env, max_episodes, eta, gamma, epsilon, seed=None):
     
     for i in range(max_episodes):
         s = env.reset()
-        q_s = [q[s,a] for a in range(env.n_actions)]
-        a = eps_greedy_action(q_s, epsilon[i], random_state)
+        a = eps_greedy_action(q[s], epsilon[i], random_state)
         done = False
         while not done:
             s_, r, done = env.step(a)
-            q_s = [q[s_,a] for a in range(env.n_actions)]
-            a_ = eps_greedy_action(q_s, epsilon[i], random_state)
+            a_ = eps_greedy_action(q[s_], epsilon[i], random_state)
             q[s, a] += eta[i] * (r + gamma*q[s_, a_] - q[s,a])
             s, a = s_, a_
     
@@ -270,12 +269,10 @@ def q_learning(env, max_episodes, eta, gamma, epsilon, seed=None):
         s = env.reset()
         done = False
         while not done:
-            q_s = [q[s,a] for a in range(env.n_actions)]
-            a = eps_greedy_action(q_s, epsilon[i], random_state)
+            a = eps_greedy_action(q[s], epsilon[i], random_state)
             s_, r, done = env.step(a)
             # Q-Learning formula
-            q_max_ = max([q[s_, a] for a in range(env.n_actions)])
-            q[s, a] = q[s, a] + eta[i] * (r + gamma * q_max_ - q[s, a])
+            q[s, a] = q[s, a] + eta[i] * (r + gamma * q[s_].max() - q[s, a])
             s = s_
 
     policy = q.argmax(axis=1)
@@ -333,10 +330,18 @@ def linear_sarsa(env, max_episodes, eta, gamma, epsilon, seed=None):
     
     for i in range(max_episodes):
         features = env.reset()
-        
         q = features.dot(theta)
-
-        # TODO:
+        a = eps_greedy_action(q, epsilon[i], random_state)
+        done = False
+        while not done:
+            features_, r, done = env.step(a)
+            delta = r - q[a]
+            q = features_.dot(theta)
+            a_ = eps_greedy_action(q, epsilon[i], random_state)
+            # Update variables
+            delta += gamma * q[a_]
+            theta += eta[i] * delta * features[a]
+            features, a = features_, a_
     
     return theta
     
@@ -350,14 +355,14 @@ def linear_q_learning(env, max_episodes, eta, gamma, epsilon, seed=None):
     
     for i in range(max_episodes):
         features = env.reset()
-        q = np.array([sum(theta * features[a]) for a in range(env.n_actions)])        
+        q = features.dot(theta)
         done = False
         while not done:
-            q_s = [q[a] for a in range(env.n_actions)]
-            a = eps_greedy_action(q_s, epsilon[i], random_state)
+            a = eps_greedy_action(q, epsilon[i], random_state)
             features_, r, done = env.step(a)
             delta = r - q[a]
-            q = np.array([sum(theta * features_[a]) for a in range(env.n_actions)])
+            # q = np.array([sum(theta * features_[a]) for a in range(env.n_actions)])
+            q = features_.dot(theta)
             # Update variables
             delta += gamma * q.max()
             theta += eta[i] * delta * features[a]
@@ -376,11 +381,14 @@ class FrozenLakeImageWrapper:
 
         lake_image = [(lake == c).astype(float) for c in ['&', '#', '$']]
 
-        self.state_image = {lake.absorbing_state: 
+        self.state_image = {env.absorbing_state: 
                             np.stack([np.zeros(lake.shape)] + lake_image)}
         for state in range(lake.size):
-            # TODO: 
-            return
+            x = state // env.width
+            y = state % env.width
+            channel1 = np.zeros(lake.shape)
+            channel1[x, y] = 1.0
+            self.state_image[state] = np.stack([channel1] + lake_image)
 
     def encode_state(self, state):
         return self.state_image[state]
@@ -428,8 +436,11 @@ class DeepQNetwork(torch.nn.Module):
 
     def forward(self, x):
         x = torch.tensor(x, dtype=torch.float)
-        
-        # TODO: 
+        x = self.conv_layer(x)
+        x = x.reshape(x.shape[0],-1)
+        x = self.fc_layer(x)
+        x = self.output_layer(x)
+        return x
 
     def train_step(self, transitions, gamma, tdqn):
         states = np.array([transition[0] for transition in transitions])
@@ -447,8 +458,7 @@ class DeepQNetwork(torch.nn.Module):
 
         target = torch.Tensor(rewards) + gamma * next_q
 
-        # TODO: the loss is the mean squared error between `q` and `target`
-        loss = 0
+        loss = ((q - target) ** 2).mean()
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -467,9 +477,8 @@ class ReplayBuffer:
         self.buffer.append(transition)
 
     def draw(self, batch_size):
-        # TODO:
-        return;
-        
+        index = self.random_state.choice(range(len(self.buffer)), batch_size)
+        return np.array(self.buffer)[index]
         
 def deep_q_network_learning(env, max_episodes, learning_rate, gamma, epsilon, 
                             batch_size, target_update_frequency, buffer_size, 
@@ -519,20 +528,20 @@ def main():
     seed = 0
     
     # Big lake
-    # lake = [['&', '.', '.', '.', '.', '.', '.', '.'],
-    #         ['.', '.', '.', '.', '.', '.', '.', '.'],
-    #         ['.', '.', '.', '#', '.', '.', '.', '.'],
-    #         ['.', '.', '.', '.', '.', '#', '.', '.'],
-    #         ['.', '.', '.', '#', '.', '.', '.', '.'],
-    #         ['.', '#', '#', '.', '.', '.', '#', '.'],
-    #         ['.', '#', '.', '.', '#', '.', '#', '.'],
-    #         ['.', '.', '.', '#', '.', '.', '.', '$']]
+    lake = [['&', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '#', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '#', '.', '.'],
+            ['.', '.', '.', '#', '.', '.', '.', '.'],
+            ['.', '#', '#', '.', '.', '.', '#', '.'],
+            ['.', '#', '.', '.', '#', '.', '#', '.'],
+            ['.', '.', '.', '#', '.', '.', '.', '$']]
     
     # Small lake
-    lake = [['&', '.', '.', '.'],
-            ['.', '#', '.', '#'],
-            ['.', '.', '.', '#'],
-            ['#', '.', '.', '$']]
+    # lake = [['&', '.', '.', '.'],
+    #         ['.', '#', '.', '#'],
+    #         ['.', '.', '.', '#'],
+    #         ['#', '.', '.', '$']]
     
     
     
@@ -540,20 +549,6 @@ def main():
         
     env = FrozenLake(lake, slip=0.1, max_steps=max_steps, seed=seed)
     gamma = 0.9
-    
-    # good_policy = np.zeros(env.n_states, dtype=int)
-    # good_policy.fill(3)
-    # for s in [2, 6, 10]: good_policy[s] = 2
-    
-    # bad_policy = np.zeros(env.n_states, dtype=int)
-    
-    # policy, value = value_iteration(env, gamma, 0.0001, 100)
-    # print(policy[:-1].reshape(4, 4))
-    # print(value[:-1].reshape(4, 4))
-    
-    # policy, value = policy_iteration(env, gamma, 0.0001, 100, bad_policy)
-    # print(policy[:-1].reshape(4, 4))
-    # print(value[:-1].reshape(4, 4))
     
     print('# Model-based algorithms')
 
