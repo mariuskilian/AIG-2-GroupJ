@@ -2,6 +2,7 @@ import numpy as np
 import contextlib
 import torch
 from collections import deque
+import matplotlib.pyplot as plt
 
 # Configures numpy print options
 @contextlib.contextmanager
@@ -183,6 +184,7 @@ def policy_evaluation(env, policy, gamma, theta, max_iterations):
         v = value.copy();
         value = np.array([outer(s) for s in range(env.n_states)])
         if max([abs(v[i] - value[i]) for i in range(len(value))]) < theta: break
+    print(f'Policy Evaluation: Number of Iterations: {_+1}')
     return value
     
 def policy_improvement(env, value, gamma):
@@ -198,10 +200,13 @@ def policy_iteration(env, gamma, theta, max_iterations, policy=None):
     value = policy_evaluation(env, policy, gamma, theta, max_iterations)
     
     old_policy = None
+    i = 0
     while not np.array_equal(policy, old_policy):
         old_policy = policy.copy()
         policy = policy_improvement(env, value, gamma)
         value = policy_evaluation(env, policy, gamma, theta, max_iterations)
+        i += 1
+    print(f'Policy Iteration: Number of Iterations: {i}')
         
     return policy, value
     
@@ -215,6 +220,7 @@ def value_iteration(env, gamma, theta, max_iterations, value=None):
         _value = value.copy()
         value = np.array([outer(s) for s in range(env.n_states)])
         if max([abs(_value[i] - value[i]) for i in range(len(value))]) < theta: break
+    print(f'Value Iteration: Number of Iterations: {_+1}')
     inner = lambda s, a: sum([env.p(s_, s, a) * value[s_] for s_ in range(env.n_states)])
     outer = lambda s: np.argmax([inner(s, a) for a in range(env.n_actions)])
     policy = np.array([outer(s) for s in range(env.n_states)])
@@ -242,6 +248,8 @@ def sarsa(env, max_episodes, eta, gamma, epsilon, seed=None):
     
     q = np.zeros((env.n_states, env.n_actions))
     
+    print()
+    q_iterations = []
     for i in range(max_episodes):
         s = env.reset()
         a = eps_greedy_action(q[s], epsilon[i], random_state)
@@ -251,6 +259,12 @@ def sarsa(env, max_episodes, eta, gamma, epsilon, seed=None):
             a_ = eps_greedy_action(q[s_], epsilon[i], random_state)
             q[s, a] += eta[i] * (r + gamma*q[s_, a_] - q[s,a])
             s, a = s_, a_
+        q_iterations += [q.max(axis=1).mean()]
+    mp = np.convolve(q_iterations, np.ones(20)/20, mode='valid')
+    plt.clf()
+    plt.cla()
+    plt.plot(np.arange(1, len(mp) + 1), mp)
+    plt.savefig('plots/sarsa.png')
     
     policy = q.argmax(axis=1)
     value = q.max(axis=1)
@@ -265,6 +279,7 @@ def q_learning(env, max_episodes, eta, gamma, epsilon, seed=None):
     
     q = np.zeros((env.n_states, env.n_actions))
     
+    q_iterations = []
     for i in range(max_episodes):
         s = env.reset()
         done = False
@@ -272,8 +287,14 @@ def q_learning(env, max_episodes, eta, gamma, epsilon, seed=None):
             a = eps_greedy_action(q[s], epsilon[i], random_state)
             s_, r, done = env.step(a)
             # Q-Learning formula
-            q[s, a] = q[s, a] + eta[i] * (r + gamma * q[s_].max() - q[s, a])
+            q[s, a] += eta[i] * (r + gamma * q[s_].max() - q[s, a])
             s = s_
+        q_iterations += [q.max(axis=1).mean()]
+    mp = np.convolve(q_iterations, np.ones(20)/20, mode='valid')
+    plt.clf()
+    plt.cla()
+    plt.plot(np.arange(1, len(mp) + 1), mp)
+    plt.savefig('plots/qLearning.png')
 
     policy = q.argmax(axis=1)
     value = q.max(axis=1)
@@ -328,6 +349,7 @@ def linear_sarsa(env, max_episodes, eta, gamma, epsilon, seed=None):
     
     theta = np.zeros(env.n_features)
     
+    q_iterations = []
     for i in range(max_episodes):
         features = env.reset()
         q = features.dot(theta)
@@ -342,6 +364,12 @@ def linear_sarsa(env, max_episodes, eta, gamma, epsilon, seed=None):
             delta += gamma * q[a_]
             theta += eta[i] * delta * features[a]
             features, a = features_, a_
+        q_iterations += [env.decode_policy(theta)[1].mean()]
+    mp = np.convolve(q_iterations, np.ones(20)/20, mode='valid')
+    plt.clf()
+    plt.cla()
+    plt.plot(np.arange(1, len(mp) + 1), mp)
+    plt.savefig('plots/linear_sarsa.png')
     
     return theta
     
@@ -353,6 +381,7 @@ def linear_q_learning(env, max_episodes, eta, gamma, epsilon, seed=None):
     
     theta = np.zeros(env.n_features)
     
+    q_iterations = []
     for i in range(max_episodes):
         features = env.reset()
         q = features.dot(theta)
@@ -367,6 +396,12 @@ def linear_q_learning(env, max_episodes, eta, gamma, epsilon, seed=None):
             delta += gamma * q.max()
             theta += eta[i] * delta * features[a]
             features = features_
+        q_iterations += [env.decode_policy(theta)[1].mean()]
+    mp = np.convolve(q_iterations, np.ones(20)/20, mode='valid')
+    plt.clf()
+    plt.cla()
+    plt.plot(np.arange(1, len(mp) + 1), mp)
+    plt.savefig('plots/linear_qLearning.png')
 
     return theta    
 
@@ -493,6 +528,7 @@ def deep_q_network_learning(env, max_episodes, learning_rate, gamma, epsilon,
 
     epsilon = np.linspace(epsilon, 0, max_episodes)
 
+    q_iterations = []
     for i in range(max_episodes):
         state = env.reset()
 
@@ -520,7 +556,13 @@ def deep_q_network_learning(env, max_episodes, learning_rate, gamma, epsilon,
 
         if (i % target_update_frequency) == 0:
             tdqn.load_state_dict(dqn.state_dict())
-
+            
+        q_iterations += [env.decode_policy(dqn)[1].mean()]
+    mp = np.convolve(q_iterations, np.ones(20)/20, mode='valid')
+    plt.clf()
+    plt.cla()
+    plt.plot(np.arange(1, len(mp) + 1), mp)
+    plt.savefig('plots/DeepQNetworkLearning.png')
     return dqn
 #endregion
 
@@ -528,20 +570,20 @@ def main():
     seed = 0
     
     # Big lake
-    lake = [['&', '.', '.', '.', '.', '.', '.', '.'],
-            ['.', '.', '.', '.', '.', '.', '.', '.'],
-            ['.', '.', '.', '#', '.', '.', '.', '.'],
-            ['.', '.', '.', '.', '.', '#', '.', '.'],
-            ['.', '.', '.', '#', '.', '.', '.', '.'],
-            ['.', '#', '#', '.', '.', '.', '#', '.'],
-            ['.', '#', '.', '.', '#', '.', '#', '.'],
-            ['.', '.', '.', '#', '.', '.', '.', '$']]
+    # lake = [['&', '.', '.', '.', '.', '.', '.', '.'],
+    #         ['.', '.', '.', '.', '.', '.', '.', '.'],
+    #         ['.', '.', '.', '#', '.', '.', '.', '.'],
+    #         ['.', '.', '.', '.', '.', '#', '.', '.'],
+    #         ['.', '.', '.', '#', '.', '.', '.', '.'],
+    #         ['.', '#', '#', '.', '.', '.', '#', '.'],
+    #         ['.', '#', '.', '.', '#', '.', '#', '.'],
+    #         ['.', '.', '.', '#', '.', '.', '.', '$']]
     
     # Small lake
-    # lake = [['&', '.', '.', '.'],
-    #         ['.', '#', '.', '#'],
-    #         ['.', '.', '.', '#'],
-    #         ['#', '.', '.', '$']]
+    lake = [['&', '.', '.', '.'],
+            ['.', '#', '.', '#'],
+            ['.', '.', '.', '#'],
+            ['#', '.', '.', '$']]
     
     
     
@@ -555,14 +597,14 @@ def main():
     print('')
 
     print('## Policy iteration')
-    policy, value = policy_iteration(env, gamma, theta=0.001, max_iterations=128)
-    env.render(policy, value)
+    # policy, value = policy_iteration(env, gamma, theta=0.001, max_iterations=128)
+    # env.render(policy, value)
 
     print('')
 
     print('## Value iteration')
-    policy, value = value_iteration(env, gamma, theta=0.001, max_iterations=128)
-    env.render(policy, value)
+    # policy, value = value_iteration(env, gamma, theta=0.001, max_iterations=128)
+    # env.render(policy, value)
 
     print('')
 
